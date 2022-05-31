@@ -87,7 +87,7 @@ variable "ethsigner" {
   })
   default = {
     container = {
-      image = { name = "consensys/quorum-ethsigner:develop", local = false }
+      image = { name = "consensys/ethsigner:develop", local = false }
       port  = 8545
     }
     host = {

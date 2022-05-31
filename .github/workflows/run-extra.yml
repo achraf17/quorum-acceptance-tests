@@ -310,7 +310,7 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           name: testreport-${{ steps.setup.outputs.tag }}
-          path: ${{ steps.setup.outputs.outputDir }}/*.txt # only files not directory
+          path: ${{ steps.setup.outputs.outputDir }}/*.* # only files not directory
       - name: 'Destroy infrastructure resources if ever created'
         if: always() && needs.condition.outputs.use_aws == 'true'
         # we don't care about containers running on the remote VM
@@ -352,6 +352,7 @@ jobs:
         # - a map: sha256(tag) => summary
         run: |
           # combine all json files into one
+          tree
           all="all.json"
           for f in `ls -d testreport-*`; do
             hash=${f#testreport-}
@@ -390,6 +391,7 @@ jobs:
             console.log(wf_run.data)
             console.log("get jobs for workflow run:", wf_run.data.jobs_url)
             const jobs_response = await github.request(wf_run.data.jobs_url)
+            console.log("Got jobs_response")
             ////////////////////////////////////
             // build slack notification message
             ////////////////////////////////////
@@ -431,18 +433,22 @@ jobs:
                 }
             }
             const commit = "${{ github.sha }}".substr(0, 6)
+            console.log("Preparing message for :", commit)
             var pr = ""
             for (p of wf_run.data.pull_requests) {
+              console.log("Fetching pr info from ", p.url)
               const pull_response = await github.request(p.url)
               pr += `,<${pull_response.data.html_url}|PR #${p.number}>`
             }
             if (pr != "") {
               pr = `for ${pr.substr(1)}`
             }
+            console.log("Built pr message :", pr)
             // build the message
             var job_blocks = []
             var is_wf_success = true
             var is_wf_failure = false
+            console.log("Iterating jobs ", jobs_response.data.jobs.length)
             for (j of jobs_response.data.jobs) {
                 console.log(j.name, ":", j.status, j.conclusion, j.started_at, j.completed_at)
                 // ignore the current job running this script
@@ -459,19 +465,23 @@ jobs:
                 var tag = j.name.replace(/[^\(]+\((.+)\)/g, "$1") // take only the tag which is in the curly brackets
                 var hash = sha256(tag)
                 console.log("Tag: " + tag + ", Hash: " + hash)
+                console.log("Looking in", reports)
                 var job_summary = reports[hash]
                 var job_summary_text = ""
                 if (job_summary != undefined) {
                   job_summary_text = `:sunny: ${job_summary.passed}   :thunder_cloud_and_rain: ${job_summary.failed}   :umbrella_with_rain_drops: ${job_summary.skipped}   `
                 }
-                job_blocks.push({
-                    type: "section",
-                    text: {
-                      type: "mrkdwn",
-                      text: `${status_icon_func(j.conclusion)} <${j.html_url}|${j.name}>\n${job_summary_text}:hourglass: ${date_diff_func(new Date(j.started_at), new Date(j.completed_at))}`
-                    }
-                })
+                if (j.conclusion == "failure") {
+                  job_blocks.push({
+                      type: "section",
+                      text: {
+                        type: "mrkdwn",
+                        text: `${status_icon_func(j.conclusion)} <${j.html_url}|${j.name}>\n${job_summary_text}:hourglass: ${date_diff_func(new Date(j.started_at), new Date(j.completed_at))}`
+                      }
+                  })
+                }
             }
+            console.log("Built job_blocks :", job_blocks)
             var workflow_status = "w_cancelled"
             if (is_wf_success) {
               workflow_status = "w_success"
@@ -524,6 +534,7 @@ jobs:
             var slack_msg = {
                 blocks: [].concat(header_blocks, job_blocks)
             }
+            console.log("Built slack_msg : ", slack_msg)
             return slack_msg
       - name: 'Prepare Slack message with partial info'
         id: short_status
@@ -534,6 +545,7 @@ jobs:
             ////////////////////////////////////
             // retrieve workflow run data
             ////////////////////////////////////
+            console.log("retrieve workflow run data")
             const wf_run = await github.actions.getWorkflowRun({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
